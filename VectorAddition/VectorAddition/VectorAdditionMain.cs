@@ -21,7 +21,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 		/// <summary>
 		/// ベクトルとして扱う場合の要素数
 		/// </summary>
-		const int VCOUNT = 16;
+		const int VECTOR_COUNT = 16;
 
 		/// <summary>
 		/// 1ワークアイテムが計算する要素数
@@ -70,6 +70,11 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 		/// 各要素を複数ずつ足すカーネル
 		/// </summary>
 		static ComputeKernel addMoreElement;
+
+		/// <summary>
+		/// ベクトルとして複数ずつ足すカーネル
+		/// </summary>
+		static ComputeKernel addMoreVector;
 		#endregion
 
 		/// <summary>
@@ -107,11 +112,12 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 				Console.WriteLine("{0}: {1,9}", name, ProcessingTime(action, useGpu, result));
 
 			// 各方法で実行して結果を表示
-			showResult("        単一CPU", false, () => SingleCpuAddition(result, left, right));
-			showResult("        複数CPU", false, () => ParallelCpuAddition(result, left, right));
-			showResult("GPU（各要素）  ", true, () => SingleGpuAdditionOneElement(result, left, right));
-			showResult("GPU（ベクトル）", true, () => SingleGpuAdditionOneVector(result, left, right));
-			showResult("GPU（複数要素）", true, () => SingleGpuAdditionMoreElement(result, left, right));
+			showResult("単一CPU                ", false, () => SingleCpuAddition(result, left, right));
+			showResult("複数CPU                ", false, () => ParallelCpuAddition(result, left, right));
+			showResult("単一GPU（各要素）      ", true,  () => SingleGpuAdditionOneElement(result, left, right));
+			showResult("単一GPU（ベクトル）    ", true,  () => SingleGpuAdditionOneVector(result, left, right));
+			showResult("単一GPU（複数要素）    ", true,  () => SingleGpuAdditionMoreElement(result, left, right));
+			showResult("単一GPU（複数ベクトル）", true,  () => SingleGpuAdditionMoreVector(result, left, right));
 
 			// 成功で終了
 			return System.Environment.ExitCode;
@@ -155,7 +161,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 				string realString = ((typeof(Real) == typeof(Double)) ? "double" : "float");
 
 				program.Build(devices,
-					string.Format(" -D REAL={0} -D REALV={0}{1} -D VLOADN=vload{1} -D VSTOREN=vstore{1} -D COUNT_PER_WORKITEM={2} -Werror", realString, VCOUNT, COUNT_PER_WORKITEM),
+					string.Format(" -D REAL={0} -D REALV={0}{1} -D VLOADN=vload{1} -D VSTOREN=vstore{1} -D COUNT_PER_WORKITEM={2} -Werror", realString, VECTOR_COUNT, COUNT_PER_WORKITEM),
 					null, IntPtr.Zero);
 			}
 			// 失敗したら
@@ -169,6 +175,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 			addOneElement = program.CreateKernel("AddOneElement");
 			addOneVector = program.CreateKernel("AddOneVector");
 			addMoreElement = program.CreateKernel("AddMoreElement");
+			addMoreVector = program.CreateKernel("AddMoreVector");
 
 			// バッファーを作成
 			bufferLeft = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly, COUNT);
@@ -319,7 +326,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 			addOneVector.SetMemoryArgument(2, bufferRight);
 
 			// 計算を実行
-			queue.Execute(addOneVector, null, new long[] { COUNT / VCOUNT }, null, null);
+			queue.Execute(addOneVector, null, new long[] { COUNT / VECTOR_COUNT }, null, null);
 
 			// 結果を読み込み
 			queue.ReadFromBuffer(bufferResult, ref result, false, null);
@@ -353,6 +360,39 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 
 			// 計算を実行
 			queue.Execute(addMoreElement, null, new long[] { COUNT/COUNT_PER_WORKITEM }, null, null);
+
+			// 結果を読み込み
+			queue.ReadFromBuffer(bufferResult, ref result, false, null);
+
+			// 終了まで待機
+			queue.Finish();
+		}
+
+		/// <summary>
+		/// GPUを1つ使って複数ずつベクトルとして加算を実行する
+		/// </summary>
+		/// <param name="result">結果を格納する対象</param>
+		/// <param name="left">計算対象1</param>
+		/// <param name="right">計算対象2</param>
+		static void SingleGpuAdditionMoreVector(Real[] result, Real[] left, Real[] right)
+		{
+			// 使用するキューを設定
+			var queue = queues[0];
+
+			// 計算対象のデータを転送
+			queue.WriteToBuffer(left, bufferLeft, false, null);
+			queue.WriteToBuffer(right, bufferRight, false, null);
+
+			// 引数を設定
+			//  # 結果を格納するベクトル
+			//  # 計算対象のベクトル1
+			//  # 計算対象のベクトル2
+			addMoreVector.SetMemoryArgument(0, bufferResult);
+			addMoreVector.SetMemoryArgument(1, bufferLeft);
+			addMoreVector.SetMemoryArgument(2, bufferRight);
+
+			// 計算を実行
+			queue.Execute(addMoreVector, null, new long[] { COUNT / COUNT_PER_WORKITEM / VECTOR_COUNT }, null, null);
 
 			// 結果を読み込み
 			queue.ReadFromBuffer(bufferResult, ref result, false, null);
