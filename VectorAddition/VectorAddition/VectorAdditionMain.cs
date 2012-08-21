@@ -16,7 +16,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 		/// <summary>
 		/// 要素数
 		/// </summary>
-		const int COUNT = 1024 * 64 * 16;
+		const int COUNT = 10240 * 64 * 16;
 
 		/// <summary>
 		/// ベクトルとして扱う場合の要素数
@@ -36,7 +36,12 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 		/// <summary>
 		/// コマンドキュー群
 		/// </summary>
-		static List<ComputeCommandQueue> queues;
+		static ComputeCommandQueue[] queues;
+
+		/// <summary>
+		/// 1デバイスで計算する要素数
+		/// </summary>
+		static int countPerDevice = COUNT;
 
 		#region バッファー
 		/// <summary>
@@ -53,6 +58,22 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 		/// 結果すべてのバッファー
 		/// </summary>
 		static ComputeBuffer<Real> bufferResult;
+
+
+		/// <summary>
+		/// 計算対象1のバッファー群
+		/// </summary>
+		static ComputeBuffer<Real>[] buffersLeft;
+
+		/// <summary>
+		/// 計算対象2のバッファー群
+		/// </summary>
+		static ComputeBuffer<Real>[] buffersRight;
+
+		/// <summary>
+		/// 結果のバッファー群
+		/// </summary>
+		static ComputeBuffer<Real>[] buffersResult;
 		#endregion
 
 		#region カーネル
@@ -96,8 +117,8 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 			// 計算対象のデータを作成
 			for(int i = 0; i < COUNT; i++)
 			{
-				left[i] = (double)i / COUNT;
-				right[i] = (double)i * i / COUNT;
+				left[i] = (Real)i / COUNT;
+				right[i] = (Real)i * i / COUNT;
 
 				answer[i] = left[i] + right[i];
 			}
@@ -107,17 +128,18 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 
 			// 実行開始
 			Console.WriteLine("== 実行速度計測開始 ==");
-			Console.WriteLine("要素数：{0}", COUNT);
+			Console.WriteLine("要素数：{0} ({1}[MB])", COUNT, COUNT * sizeof(Real) / 1024 / 1024);
 			Action<string, bool, Action> showResult = (name, useGpu, action) =>
 				Console.WriteLine("{0}: {1,9}", name, ProcessingTime(action, useGpu, result));
 
 			// 各方法で実行して結果を表示
 			showResult("単一CPU                ", false, () => SingleCpuAddition(result, left, right));
 			showResult("複数CPU                ", false, () => ParallelCpuAddition(result, left, right));
-			showResult("単一GPU（各要素）      ", true,  () => SingleGpuAdditionOneElement(result, left, right));
 			showResult("単一GPU（ベクトル）    ", true,  () => SingleGpuAdditionOneVector(result, left, right));
 			showResult("単一GPU（複数要素）    ", true,  () => SingleGpuAdditionMoreElement(result, left, right));
-			showResult("単一GPU（複数ベクトル）", true,  () => SingleGpuAdditionMoreVector(result, left, right));
+			showResult("単一GPU（複数ベクトル）", true, () => SingleGpuAdditionMoreVector(result, left, right));
+			showResult("単一GPU（各要素）      ", true, () => SingleGpuAdditionOneElement(result, left, right));
+			showResult("複数GPU（各要素）      ", true,  () => ParallelGpuAdditionOneElement(result, left, right));
 
 			// 成功で終了
 			return System.Environment.ExitCode;
@@ -139,14 +161,19 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 			var devices = context.Devices;
 			Console.WriteLine("デバイス数：{0}", devices.Count);
 
+			// 1デバイスで使う要素数を計算
+			countPerDevice = (int)Math.Ceiling((double)COUNT / devices.Count);
+
 			// キューの配列を作成
-			queues = new List<ComputeCommandQueue>(devices.Count);
+			queues = new ComputeCommandQueue[devices.Count];
 
 			// 利用可能なデバイスすべてに対して
-			foreach(var device in devices)
+			for(int i = 0; i < devices.Count; i++)
 			{
+				var device = devices[i];
+
 				// キューを作成
-				queues.Add(new ComputeCommandQueue(context, device, ComputeCommandQueueFlags.None));
+				queues[i] = new ComputeCommandQueue(context, device, ComputeCommandQueueFlags.None);
 
 				// デバイス情報を表示
 				Console.WriteLine("* {0} ({1})", device.Name, device.Vendor);
@@ -181,6 +208,15 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 			bufferLeft = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly, COUNT);
 			bufferRight = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly, COUNT);
 			bufferResult = new ComputeBuffer<Real>(context, ComputeMemoryFlags.WriteOnly, COUNT);
+			buffersLeft = new ComputeBuffer<Real>[devices.Count];
+			buffersRight = new ComputeBuffer<Real>[devices.Count];
+			buffersResult = new ComputeBuffer<Real>[devices.Count];
+			for(int i = 0; i < devices.Count; i++)
+			{
+				buffersLeft[i] = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly, countPerDevice);
+				buffersRight[i] = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly, countPerDevice);
+				buffersResult[i] = new ComputeBuffer<Real>(context, ComputeMemoryFlags.WriteOnly, countPerDevice);
+			}
 		}
 
 		/// <summary>
@@ -284,6 +320,10 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 			queue.WriteToBuffer(left,  bufferLeft, false, null);
 			queue.WriteToBuffer(right, bufferRight, false, null);
 
+			//queue.Finish();
+			//var stopwatch = new System.Diagnostics.Stopwatch();
+			//stopwatch.Restart();
+
 			// 引数を設定
 			//  # 結果を格納するベクトル
 			//  # 計算対象のベクトル1
@@ -294,6 +334,9 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 
 			// 計算を実行
 			queue.Execute(addOneElement, null, new long[] { COUNT }, null, null);
+
+			//queue.Finish();
+			//Console.WriteLine(stopwatch.ElapsedTicks);
 
 			// 結果を読み込み
 			queue.ReadFromBuffer(bufferResult, ref result, false, null);
@@ -399,6 +442,64 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 
 			// 終了まで待機
 			queue.Finish();
+		}
+
+
+		/// <summary>
+		/// GPUを複数使って1つずつ加算を実行する
+		/// </summary>
+		/// <param name="result">結果を格納する対象</param>
+		/// <param name="left">計算対象1</param>
+		/// <param name="right">計算対象2</param>
+		static void ParallelGpuAdditionOneElement(Real[] result, Real[] left, Real[] right)
+		{
+			for(int i = 0; i < queues.Length; i++)
+			{
+				// 計算対象のデータを転送
+				queues[i].WriteToBuffer(left, buffersLeft[i], false, countPerDevice*i, 0, countPerDevice, null);
+				queues[i].WriteToBuffer(right, buffersRight[i], false, countPerDevice * i, 0, countPerDevice, null);
+			}
+
+			//foreach(var queue in queues)
+			//{
+			//    queue.Finish();
+			//}
+			//var stopwatch = new System.Diagnostics.Stopwatch();
+			//stopwatch.Restart();
+
+
+			for(int i = 0; i < queues.Length; i++)
+			{
+				// 引数を設定
+				//  # 結果を格納するベクトル
+				//  # 計算対象のベクトル1
+				//  # 計算対象のベクトル2
+				addOneElement.SetMemoryArgument(0, buffersResult[i]);
+				addOneElement.SetMemoryArgument(1, buffersLeft[i]);
+				addOneElement.SetMemoryArgument(2, buffersRight[i]);
+
+				// 計算を実行
+				queues[i].Execute(addOneElement, null, new long[] { countPerDevice }, null, null);
+			}
+
+
+			//foreach(var queue in queues)
+			//{
+			//    queue.Finish();
+			//}
+			//Console.WriteLine(stopwatch.ElapsedTicks);
+
+			for(int i = 0; i < queues.Length; i++)
+			{
+				// 結果を読み込み
+				queues[i].ReadFromBuffer(buffersResult[i], ref result, false, 0, countPerDevice*i, countPerDevice, null);
+			}
+
+			// 終了まで待機
+			foreach(var queue in queues)
+			{
+				queue.Finish();
+			}
 		}
 	}
 }
