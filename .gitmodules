@@ -1,0 +1,3 @@
+[submodule "Cloo"]
+	path = Cloo
+	url = git@github.com:aokomoriuta/Cloo.git

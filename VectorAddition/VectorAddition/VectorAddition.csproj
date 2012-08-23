@@ -43,12 +43,6 @@
     <Compile Include="VectorAdditionMain.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\Cloo\Cloo.csproj">
-      <Project>{656E96CE-2587-4CCC-A4DB-06D36267133A}</Project>
-      <Name>Cloo</Name>
-    </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
     <Reference Include="System" />
   </ItemGroup>
   <ItemGroup>
@@ -59,6 +53,12 @@
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Cloo\Cloo\Cloo.VS2010.csproj">
+      <Project>{656E96CE-2587-4CCC-A4DB-06D36267133A}</Project>
+      <Name>Cloo.VS2010</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
