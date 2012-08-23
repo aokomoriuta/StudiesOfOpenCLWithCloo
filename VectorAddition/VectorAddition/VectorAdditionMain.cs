@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using Cloo;
 
 // 倍精度か単精度かどっちか選択
-//using Real = System.Single;
-using Real = System.Double;
+using Real = System.Single;
+//using Real = System.Double;
 
 namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 {
@@ -21,7 +21,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 		/// <summary>
 		/// ベクトルとして扱う場合の要素数
 		/// </summary>
-		const int VECTOR_COUNT = 2;
+		const int VECTOR_COUNT = 16;
 
 		/// <summary>
 		/// 1ワークアイテムが計算する要素数
@@ -63,17 +63,17 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 		/// <summary>
 		/// 計算対象1のバッファー群
 		/// </summary>
-		static ComputeBuffer<Real>[] buffersLeft;
+		static ComputeSubBuffer<Real>[] buffersLeft;
 
 		/// <summary>
 		/// 計算対象2のバッファー群
 		/// </summary>
-		static ComputeBuffer<Real>[] buffersRight;
+		static ComputeSubBuffer<Real>[] buffersRight;
 
 		/// <summary>
 		/// 結果のバッファー群
 		/// </summary>
-		static ComputeBuffer<Real>[] buffersResult;
+		static ComputeSubBuffer<Real>[] buffersResult;
 		#endregion
 
 		#region カーネル
@@ -135,13 +135,14 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 			// 各方法で実行して結果を表示
 			showResult("単一CPU                ", false, () => SingleCpuAddition(result, left, right));
 			showResult("複数CPU                ", false, () => ParallelCpuAddition(result, left, right));
-			showResult("単一GPU（各要素）      ", true, () => SingleGpuAdditionOneElement(result, left, right));
-			showResult("単一GPU（ベクトル）    ", true,  () => SingleGpuAdditionOneVector(result, left, right));
-			showResult("単一GPU（複数要素）    ", true,  () => SingleGpuAdditionMoreElement(result, left, right));
-			showResult("単一GPU（複数ベクトル）", true, () => SingleGpuAdditionMoreVector(result, left, right));
+			//showResult("単一GPU（各要素）      ", true, () => SingleGpuAdditionOneElement(result, left, right));
+			//showResult("単一GPU（ベクトル）    ", true,  () => SingleGpuAdditionOneVector(result, left, right));
+			//showResult("単一GPU（複数要素）    ", true,  () => SingleGpuAdditionMoreElement(result, left, right));
+			//showResult("単一GPU（複数ベクトル）", true, () => SingleGpuAdditionMoreVector(result, left, right));
 			showResult("単一GPU（各要素）      ", true, () => SingleGpuAdditionOneElement(result, left, right));
 			showResult("複数GPU（各要素）      ", true, () => ParallelGpuAdditionOneElement(result, left, right));
-			showResult("複数GPU（ベクトル）    ", true, () => ParallelGpuAdditionOneVector(result, left, right));
+			//showResult("複数GPU（ベクトル）    ", true, () => ParallelGpuAdditionOneVector(result, left, right));
+			//showResult("複数GPU（各要素）      ", true, () => ParallelGpuAdditionOneElement(result, left, right));
 
 			// 成功で終了
 			return System.Environment.ExitCode;
@@ -207,29 +208,28 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 			addMoreVector = program.CreateKernel("AddMoreVector");
 
 			// バッファーを作成
-			bufferLeft = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.CopyHostPointer, left);
-			bufferRight = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.CopyHostPointer, right);
+			bufferLeft = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.UseHostPointer, left);
+			bufferRight = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.UseHostPointer, right);
 			bufferResult = new ComputeBuffer<Real>(context, ComputeMemoryFlags.WriteOnly | ComputeMemoryFlags.UseHostPointer, result);
-			buffersLeft = new ComputeBuffer<Real>[devices.Count];
-			buffersRight = new ComputeBuffer<Real>[devices.Count];
-			buffersResult = new ComputeBuffer<Real>[devices.Count];
-			IntPtr leftPtr = System.Runtime.InteropServices.GCHandle.Alloc(left, System.Runtime.InteropServices.GCHandleType.Pinned).AddrOfPinnedObject();
-			IntPtr rightPtr = System.Runtime.InteropServices.GCHandle.Alloc(right, System.Runtime.InteropServices.GCHandleType.Pinned).AddrOfPinnedObject();
+
+			buffersLeft = new ComputeSubBuffer<Real>[devices.Count];
+			buffersRight = new ComputeSubBuffer<Real>[devices.Count];
+			buffersResult = new ComputeSubBuffer<Real>[devices.Count];
 			for(int i = 0; i < devices.Count; i++)
 			{
-				buffersLeft[i] = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.CopyHostPointer, countPerDevice, IntPtr.Add(leftPtr, countPerDevice * i * sizeof(Real)));
-				buffersRight[i] = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.CopyHostPointer, countPerDevice, IntPtr.Add(rightPtr, countPerDevice * i * sizeof(Real)));
-				buffersResult[i] = new ComputeBuffer<Real>(context, ComputeMemoryFlags.WriteOnly, countPerDevice);
+				buffersLeft[i] = new ComputeSubBuffer<Real>(bufferLeft, ComputeMemoryFlags.ReadOnly, countPerDevice * i, countPerDevice);
+				buffersRight[i] = new ComputeSubBuffer<Real>(bufferRight, ComputeMemoryFlags.ReadOnly, countPerDevice * i, countPerDevice);
+				buffersResult[i] = new ComputeSubBuffer<Real>(bufferResult, ComputeMemoryFlags.WriteOnly, countPerDevice * i, countPerDevice);
 			}
 
 			// 計算対象のデータを転送
-			queues[0].WriteToBuffer(left, bufferLeft, false, null);
-			queues[0].WriteToBuffer(right, bufferRight, true, null);
-			for(int i = 0; i < queues.Length; i++)
-			{
-				queues[i].WriteToBuffer(left, buffersLeft[i], false, countPerDevice * i, 0, countPerDevice, null);
-				queues[i].WriteToBuffer(right, buffersRight[i], false, countPerDevice * i, 0, countPerDevice, null);
-			}
+			//queues[0].WriteToBuffer(left, bufferLeft, false, null);
+			//queues[0].WriteToBuffer(right, bufferRight, true, null);
+			//for(int i = 0; i < queues.Length; i++)
+			//{
+			//    //queues[i].WriteToBuffer(left, buffersLeft[i], false, countPerDevice * i, 0, countPerDevice, null);
+			//    //queues[i].WriteToBuffer(right, buffersRight[i], false, countPerDevice * i, 0, countPerDevice, null);
+			//}
 		}
 
 		/// <summary>
@@ -278,7 +278,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition
 				if(result[i] != answer[i])
 				{
 					// 出力
-					//Console.WriteLine("{0,8}: r={1,5:f} vs a={2,5:f}", i, result[i], answer[i]); 
+					Console.WriteLine("{0,8}: r={1,5:f} vs a={2,5:f}", i, result[i], answer[i]); 
 				}
 			}
 
