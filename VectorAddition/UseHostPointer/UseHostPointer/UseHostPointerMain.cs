@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using Cloo;
 
 // 倍精度か単精度かどっちか選択
-using Real = System.Single;
-//using Real = System.Double;
+//using Real = System.Single;
+using Real = System.Double;
 
 namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.UseHostPointer
 {
@@ -16,7 +16,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.UseHostPointer
 		/// <summary>
 		/// 要素数
 		/// </summary>
-		const int COUNT = 1024 * 1024 * 20;
+		const int COUNT = 1024 * 1024 * 15;
 
 		/// <summary>
 		/// 検算用ベクトル
@@ -110,7 +110,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.UseHostPointer
 		static int Main()
 		{
 			Console.WriteLine("= ベクトル加算の試験 =");
-			Console.WriteLine("複数GPUを使う");
+			Console.WriteLine("ホストポインタの使用有無での比較");
 			Console.WriteLine();
 
 			// 計算対象および結果を格納するベクトルを作成
