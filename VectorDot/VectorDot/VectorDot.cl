@@ -54,16 +54,47 @@ __kernel void ReductionSum0(
 */
 __kernel void ReductionSum1(
 	__global Real* values,
-	const int count)
+	const int count,
+	__local Real* localValues)
 {
-	// get element index
-	const int i = get_global_id(0);
-	const int j = i + get_global_size(0);
+	// get local size
+	const int localSize = get_local_size(0);
 
-	// only in region of target
-	if(j < count)
+	// get group index and size
+	const int groupID = get_group_id(0);
+	const int groupSize = get_num_groups(0);
+
+	// get this element's index
+	const int iLocal = get_local_id(0);
+	const int iGlobal = (iLocal == 0) ? groupID : (groupSize + groupID*(localSize-1) + iLocal - 1);
+
+	// copy values to local from grobal
+	localValues[iLocal] = (iGlobal < count) ? values[iGlobal] : 0;
+
+	// synchronize work items in this group
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	// loop for reduction
+	for(int nextOffset = 1; nextOffset < localSize; nextOffset *= 2)
 	{
-		// add next values to this
-		values[i] += values[j];
+		// if this should work
+		if(iLocal % (nextOffset*2) == 0)
+		{
+			// get next element's index
+			const int jLocal = iLocal + nextOffset;
+
+			// add next values to this
+			localValues[iLocal] += localValues[jLocal];
+		}
+
+		// synchronize work items in this group
+		barrier(CLK_LOCAL_MEM_FENCE);
+	}
+
+	// only the first work-item in this group
+	if(iLocal == 0)
+	{
+		// store sum of this group to global value
+		values[groupID] = localValues[0];
 	}
 }
