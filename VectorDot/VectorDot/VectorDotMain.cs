@@ -16,7 +16,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 		/// <summary>
 		/// 要素数
 		/// </summary>
-		const int COUNT = 21;// * 1024 * 1024;
+		const int COUNT = 21 * 1024 * 1024;
 
 		/// <summary>
 		/// 検算値
@@ -97,7 +97,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 		/// <remarks>
 		/// ver 0: グローバルメモリのまま使用
 		/// ver 1: ローカルメモリ使用
-		/// ver 2: 前半部分を後半部分にと足す
+		/// ver 2: 前半部分を後半部分に足す
 		/// </remarks>
 		static ComputeKernel[,] reductionSum;
 
@@ -159,11 +159,13 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			showResult("複数CPU              ", false, () => VectorDotParallelCpu(left, right));
 			showResult("単一GPU（計算 ver.0）", true, () => VectorDotSingleGpu0());
 			showResult("単一GPU（計算 ver.1）", true, () => VectorDotSingleGpu1());
+			showResult("単一GPU（計算 ver.2）", true, () => VectorDotSingleGpu2());
 
 			// もう1回
 			Console.WriteLine("---");
 			showResult("単一GPU（計算 ver.0）", true, () => VectorDotSingleGpu0());
 			showResult("単一GPU（計算 ver.1）", true, () => VectorDotSingleGpu1());
+			showResult("単一GPU（計算 ver.2）", true, () => VectorDotSingleGpu2());
 
 			// 成功で終了
 			return System.Environment.ExitCode;
@@ -238,6 +240,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 
 				reductionSum[0, i] = program.CreateKernel("ReductionSum0");
 				reductionSum[1, i] = program.CreateKernel("ReductionSum1");
+				reductionSum[2, i] = program.CreateKernel("ReductionSum2");
 			}
 
 			// 単一GPU用バッファーを作成
@@ -434,6 +437,60 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 
 				// 次の配列の要素数を今のワークアイテム数にする
 				 targetSize = globalSize / localSize;
+			}
+
+			// 結果を読み込み
+			queues[0].ReadFromBuffer(bufferResult, ref resultsPerDevice, false, 0, 0, 1, null);
+
+			// 終了まで待機
+			queues[0].Finish();
+
+			return resultsPerDevice[0];
+		}
+
+
+
+		/// <summary>
+		///	GPUを1つ使って内積を計算する（リダクションのバージョン2使用）
+		/// </summary>
+		/// <returns>各要素同士の積の総和</returns>
+		static Real VectorDotSingleGpu2()
+		{
+			// 各要素同士の積を計算
+			//  # 結果を格納するベクトル
+			//  # 計算対象のベクトル1
+			//  # 計算対象のベクトル2
+			multyplyEachElement[0].SetMemoryArgument(0, bufferResult);
+			multyplyEachElement[0].SetMemoryArgument(1, bufferLeft);
+			multyplyEachElement[0].SetMemoryArgument(2, bufferRight);
+			queues[0].Execute(multyplyEachElement[0], null, new long[] { COUNT }, null, null);
+
+			// 計算する配列の要素数
+			int targetSize = COUNT;
+
+			//var debug = new Real[COUNT];
+			//queues[0].ReadFromBuffer(bufferResult, ref debug, true, null);
+
+			// 計算する配列の要素数が1以上の間
+			while(targetSize > 1)
+			{
+				// ワークアイテム数を計算
+				int globalSize = (int)Math.Ceiling((double)targetSize / localSize) * localSize;
+
+				// 隣との和を計算
+				//  # 和を計算するベクトル
+				//  # 計算する要素数
+				//  # ローカルメモリ
+				reductionSum[2, 0].SetMemoryArgument(0, bufferResult);
+				reductionSum[2, 0].SetValueArgument(1, targetSize);
+				reductionSum[2, 0].SetLocalArgument(2, sizeof(Real) * localSize);
+				queues[0].Execute(reductionSum[2, 0], null, new long[] { globalSize }, new long[] { localSize }, null);
+
+
+				//queues[0].ReadFromBuffer(bufferResult, ref debug, true, null);
+
+				// 次の配列の要素数を今のワークアイテム数にする
+				targetSize = globalSize / localSize;
 			}
 
 			// 結果を読み込み
