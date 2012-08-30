@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using Cloo;
 
 // 倍精度か単精度かどっちか選択
-using Real = System.Single;
-//using Real = System.Double;
+//using Real = System.Single;
+using Real = System.Double;
 
 namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.MultiGpu
 {
@@ -119,10 +119,12 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.MultiGpu
 				Console.WriteLine("{0}: {1,12}", name, ProcessingTime(action, useGpu, result));
 
 			// 各方法で実行して結果を表示
-			showResult("単一CPU                ", false, () => SingleCpuAddition(result, left, right));
-			showResult("複数CPU                ", false, () => ParallelCpuAddition(result, left, right));
-			showResult("単一GPU（各要素）      ", true, () => SingleGpuAdditionOneElement(result, left, right));
-			showResult("複数GPU（各要素）      ", true, () => ParallelGpuAdditionOneElement(result, left, right));
+			showResult("単一CPU                         ", false, () => SingleCpuAddition(result, left, right));
+			showResult("複数CPU                         ", false, () => ParallelCpuAddition(result, left, right));
+			showResult("単一GPU（各要素）-データ転送あり", true, () => SingleGpuAdditionOneElement(result, left, right));
+			showResult("単一GPU（各要素）-データ転送なし", true, () => SingleGpuAdditionOneElement(result, left, right));
+			showResult("複数GPU（各要素）-データ転送あり", true, () => ParallelGpuAdditionOneElement(result, left, right));
+			showResult("複数GPU（各要素）-データ転送なし", true, () => ParallelGpuAdditionOneElement(result, left, right));
 
 			// 成功で終了
 			return System.Environment.ExitCode;

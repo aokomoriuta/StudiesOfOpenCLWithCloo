@@ -2,8 +2,8 @@
 using Cloo;
 
 // 倍精度か単精度かどっちか選択
-//using Real = System.Single;
-using Real = System.Double;
+using Real = System.Single;
+//using Real = System.Double;
 
 namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.HeavyWorkItem
 {
