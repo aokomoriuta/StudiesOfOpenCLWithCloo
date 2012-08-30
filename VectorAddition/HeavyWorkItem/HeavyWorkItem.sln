@@ -1,9 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 11.00
 # Visual Studio 2010
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VectorAddition", "VectorAddition\VectorAddition.csproj", "{D4299784-CA12-4614-9215-95AF837C9409}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HeavyWorkItem", "HeavyWorkItem\HeavyWorkItem.csproj", "{D4299784-CA12-4614-9215-95AF837C9409}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cloo.VS2010", "..\Cloo\Cloo\Cloo.VS2010.csproj", "{656E96CE-2587-4CCC-A4DB-06D36267133A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cloo.VS2010", "..\..\Cloo\Cloo\Cloo.VS2010.csproj", "{656E96CE-2587-4CCC-A4DB-06D36267133A}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
