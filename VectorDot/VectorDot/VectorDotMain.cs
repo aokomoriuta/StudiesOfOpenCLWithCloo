@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using Cloo;
 
 // 倍精度か単精度かどっちか選択
-using Real = System.Single;
-//using Real = System.Double;
+//using Real = System.Single;
+using Real = System.Double;
 
 namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 {
@@ -16,7 +16,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 		/// <summary>
 		/// 要素数
 		/// </summary>
-		const int COUNT = 21 * 1024 * 1024;
+		const int COUNT = 21;// * 1024 * 1024;
 
 		/// <summary>
 		/// 検算値
@@ -32,6 +32,11 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 		/// 1デバイスで計算する要素数
 		/// </summary>
 		static int countPerDevice = COUNT;
+
+		/// <summary>
+		/// ワークグループ内ワークアイテム数
+		/// </summary>
+		static int localSize = 1;
 
 		/// <summary>
 		/// CPUで並列させる数
@@ -94,7 +99,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 		/// <summary>
 		/// リダクションを実装しているバージョン数
 		/// </summary>
-		const int REDUCTION_VERSION = 0;
+		const int REDUCTION_VERSION = 1;
 
 		/// <summary>
 		/// エントリーポイント
@@ -147,8 +152,13 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			// 各方法で実行して結果を表示
 			showResult("単一CPU              ", false, () => VectorDotSingleCpu(left, right));
 			showResult("複数CPU              ", false, () => VectorDotParallelCpu(left, right));
-			showResult("単一GPU（データ転送）", true, () => { WriteBuffers(left, right); return answer; });
 			showResult("単一GPU（計算 ver.0）", true, () => VectorDotSingleGpu0());
+			showResult("単一GPU（計算 ver.1）", true, () => VectorDotSingleGpu1());
+
+			// もう1回
+			Console.WriteLine("---");
+			showResult("単一GPU（計算 ver.0）", true, () => VectorDotSingleGpu0());
+			showResult("単一GPU（計算 ver.1）", true, () => VectorDotSingleGpu1());
 
 			// 成功で終了
 			return System.Environment.ExitCode;
@@ -175,6 +185,9 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 
 			// デバイス内での結果を作成
 			resultsPerDevice = new Real[devices.Count];
+
+			// ワークグループ内ワークアイテム数
+			localSize = (int)devices[0].MaxWorkItemSizes[0];
 
 			// キューの配列を作成
 			queues = new ComputeCommandQueue[devices.Count];
@@ -219,6 +232,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 				multyplyEachElement[i] = program.CreateKernel("MultyplyEachElement");
 
 				reductionSum[0, i] = program.CreateKernel("ReductionSum0");
+				reductionSum[1, i] = program.CreateKernel("ReductionSum1");
 			}
 
 			// 単一GPU用バッファーを作成
@@ -246,7 +260,22 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 		static long ProcessingTime(Func<Real> action, bool useGpu)
 		{
 			// ストップウォッチ作成
-			var stopwatch = new System.Diagnostics.Stopwatch();		
+			var stopwatch = new System.Diagnostics.Stopwatch();
+
+			// GPUなら
+			if(useGpu)
+			{
+				//// 全キューについて
+				//System.Threading.Tasks.Parallel.For(0, queues.Length, (i) =>
+				//{
+				//    // 使用するキューを設定
+				//    var queue = queues[i];
+
+				//    // 結果バッファーに初期状態を転送
+				//    //queue.WriteToBuffer(result, buffersNonHostResult[i], false, 0, 0, 1, null);
+				//});
+			}
+			
 
 
 			// 計測開始
@@ -325,22 +354,6 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			return result;
 		}
 
-
-		/// <summary>
-		/// 単一GPUに各データを転送する
-		/// </summary>
-		/// <param name="left">計算対象1</param>
-		/// <param name="right">計算対象2</param>
-		static void WriteBuffer(Real[] left, Real[] right)
-		{
-			// 使用するキューを設定
-			var queue = queues[0];
-
-			// データを転送
-			queue.WriteToBuffer(left, bufferLeft, false, null);
-			queue.WriteToBuffer(right, bufferRight, false, null);
-		}
-
 		/// <summary>
 		///	GPUを1つ使って内積を計算する（バージョン0、隣と足しあわせていくだけ）
 		/// </summary>
@@ -370,6 +383,50 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 				reductionSum[0,0].SetValueArgument(1, COUNT);
 				reductionSum[0,0].SetValueArgument(2, n);
 				queues[0].Execute(reductionSum[0,0], null, new long[] { globalSize }, null, null);
+			}
+
+			// 結果を読み込み
+			queues[0].ReadFromBuffer(bufferResult, ref resultsPerDevice, false, 0, 0, 1, null);
+
+			// 終了まで待機
+			queues[0].Finish();
+
+			return resultsPerDevice[0];
+		}
+
+		/// <summary>
+		///	GPUを1つ使って内積を計算する（バージョン1、後半部分を前半部分に足していく）
+		/// </summary>
+		/// <returns>各要素同士の積の総和</returns>
+		static Real VectorDotSingleGpu1()
+		{
+			// 各要素同士の積を計算
+			//  # 結果を格納するベクトル
+			//  # 計算対象のベクトル1
+			//  # 計算対象のベクトル2
+			multyplyEachElement[0].SetMemoryArgument(0, bufferResult);
+			multyplyEachElement[0].SetMemoryArgument(1, bufferLeft);
+			multyplyEachElement[0].SetMemoryArgument(2, bufferRight);
+			queues[0].Execute(multyplyEachElement[0], null, new long[] { COUNT }, null, null);
+
+			// 計算する配列の要素数
+			int targetSize = COUNT;
+
+			// リダクションを繰り返す
+			for(int n = 1; n < COUNT; n *= 2)
+			{
+				// ワークアイテム数を計算
+				int globalSize = Math.Max((int)Math.Ceiling(COUNT / 2.0 / n), 1);
+
+				// 隣との和を計算
+				//  # 和を計算するベクトル
+				//  # 要素数
+				reductionSum[1, 0].SetMemoryArgument(0, bufferResult);
+				reductionSum[1, 0].SetValueArgument(1, targetSize);
+				queues[0].Execute(reductionSum[1, 0], null, new long[] { globalSize }, null, null);
+
+				// 次の配列の要素数を今のワークアイテム数にする
+				targetSize = globalSize;
 			}
 
 			// 結果を読み込み

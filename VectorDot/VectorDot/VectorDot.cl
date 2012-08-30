@@ -45,3 +45,25 @@ __kernel void ReductionSum0(
 		values[i] += values[j];
 	}
 }
+
+//! Sum array by reduction ver. 1
+/*!
+	\param values target array
+	\param count number of elements
+	\param nextOffset offset of next element of this element
+*/
+__kernel void ReductionSum1(
+	__global Real* values,
+	const int count)
+{
+	// get element index
+	const int i = get_global_id(0);
+	const int j = i + get_global_size(0);
+
+	// only in region of target
+	if(j < count)
+	{
+		// add next values to this
+		values[i] += values[j];
+	}
+}
