@@ -99,13 +99,14 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 		/// ver 1: ローカルメモリ使用
 		/// ver 2: 前半部分を後半部分に足す
 		/// ver 3: ローカルへの複製のみのワークアイテムをなくして、数を減らす
+		/// ver 4: 2倍および1/2倍をビットシフト演算にする
 		/// </remarks>
 		static ComputeKernel[,] reductionSum;
 
 		/// <summary>
 		/// リダクションを実装しているバージョン数
 		/// </summary>
-		const int REDUCTION_VERSION = 3;
+		const int REDUCTION_VERSION = 4;
 
 		/// <summary>
 		/// エントリーポイント
@@ -162,6 +163,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			showResult("単一GPU（計算 ver.1）", true, () => VectorDotSingleGpu1());
 			showResult("単一GPU（計算 ver.2）", true, () => VectorDotSingleGpu2());
 			showResult("単一GPU（計算 ver.3）", true, () => VectorDotSingleGpu3());
+			showResult("単一GPU（計算 ver.4）", true, () => VectorDotSingleGpu4());
 
 			// もう1回
 			Console.WriteLine("---");
@@ -169,6 +171,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			showResult("単一GPU（計算 ver.1）", true, () => VectorDotSingleGpu1());
 			showResult("単一GPU（計算 ver.2）", true, () => VectorDotSingleGpu2());
 			showResult("単一GPU（計算 ver.3）", true, () => VectorDotSingleGpu3());
+			showResult("単一GPU（計算 ver.4）", true, () => VectorDotSingleGpu4());
 
 			// 成功で終了
 			return System.Environment.ExitCode;
@@ -245,6 +248,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 				reductionSum[1, i] = program.CreateKernel("ReductionSum1");
 				reductionSum[2, i] = program.CreateKernel("ReductionSum2");
 				reductionSum[3, i] = program.CreateKernel("ReductionSum3");
+				reductionSum[4, i] = program.CreateKernel("ReductionSum4");
 			}
 
 			// 単一GPU用バッファーを作成
@@ -531,6 +535,58 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 				reductionSum[3, 0].SetValueArgument(1, targetSize);
 				reductionSum[3, 0].SetLocalArgument(2, sizeof(Real) * localSize);
 				queues[0].Execute(reductionSum[3, 0], null, new long[] { globalSize }, new long[] { localSize }, null);
+
+				// 次の配列の要素数を今のワークアイテム数にする
+				targetSize = globalSize / localSize;
+			}
+
+			// 結果を読み込み
+			queues[0].ReadFromBuffer(bufferResult, ref resultsPerDevice, false, 0, 0, 1, null);
+
+			// 終了まで待機
+			queues[0].Finish();
+
+			return resultsPerDevice[0];
+		}
+
+		/// <summary>
+		///	GPUを1つ使って内積を計算する（リダクションのバージョン4使用）
+		/// </summary>
+		/// <returns>各要素同士の積の総和</returns>
+		static Real VectorDotSingleGpu4()
+		{
+			// 各要素同士の積を計算
+			//  # 結果を格納するベクトル
+			//  # 計算対象のベクトル1
+			//  # 計算対象のベクトル2
+			multyplyEachElement[0].SetMemoryArgument(0, bufferResult);
+			multyplyEachElement[0].SetMemoryArgument(1, bufferLeft);
+			multyplyEachElement[0].SetMemoryArgument(2, bufferRight);
+			queues[0].Execute(multyplyEachElement[0], null, new long[] { COUNT }, null, null);
+
+			// 計算する配列の要素数
+			int targetSize = COUNT;
+
+			//var debug = new Real[COUNT];
+			//queues[0].ReadFromBuffer(bufferResult, ref debug, true, null);
+
+			// 計算する配列の要素数が1以上の間
+			while(targetSize > 1)
+			{
+				// ワークアイテム数を計算
+				int globalSize = (int)Math.Ceiling((double)targetSize / 2 / localSize) * localSize;
+
+				// 隣との和を計算
+				//  # 和を計算するベクトル
+				//  # 計算する要素数
+				//  # ローカルメモリ
+				reductionSum[4, 0].SetMemoryArgument(0, bufferResult);
+				reductionSum[4, 0].SetValueArgument(1, targetSize);
+				reductionSum[4, 0].SetLocalArgument(2, sizeof(Real) * localSize);
+				queues[0].Execute(reductionSum[4, 0], null, new long[] { globalSize }, new long[] { localSize }, null);
+
+
+				//queues[0].ReadFromBuffer(bufferResult, ref debug, true, 0, 0, targetSize, null);
 
 				// 次の配列の要素数を今のワークアイテム数にする
 				targetSize = globalSize / localSize;
