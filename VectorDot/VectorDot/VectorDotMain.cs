@@ -29,9 +29,9 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 		static ComputeCommandQueue[] queues;
 
 		/// <summary>
-		/// 1デバイスで計算する要素数
+		/// 各デバイスで計算する要素数
 		/// </summary>
-		static int countPerDevice = COUNT;
+		static int[] countPerDevice;
 
 		/// <summary>
 		/// ワークグループ内ワークアイテム数
@@ -92,7 +92,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 		static ComputeKernel[] multyplyEachElement;
 
 		/// <summary>
-		/// 全要素の和を計算するカーネル
+		/// リダクションで全要素の和を計算するカーネル
 		/// </summary>
 		/// <remarks>
 		/// ver 0: グローバルメモリのまま使用
@@ -164,6 +164,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			showResult("単一GPU（計算 ver.2）", true, () => VectorDotSingleGpu2());
 			showResult("単一GPU（計算 ver.3）", true, () => VectorDotSingleGpu3());
 			showResult("単一GPU（計算 ver.4）", true, () => VectorDotSingleGpu4());
+			showResult("複数GPU（計算 ver.4）", true, () => { WriteBuffers(left, right); return VectorDotParallelGpu4(); });
 
 			// もう1回
 			Console.WriteLine("---");
@@ -172,6 +173,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			showResult("単一GPU（計算 ver.2）", true, () => VectorDotSingleGpu2());
 			showResult("単一GPU（計算 ver.3）", true, () => VectorDotSingleGpu3());
 			showResult("単一GPU（計算 ver.4）", true, () => VectorDotSingleGpu4());
+			showResult("複数GPU（計算 ver.4）", true, () => VectorDotParallelGpu4());
 
 			// 成功で終了
 			return System.Environment.ExitCode;
@@ -193,8 +195,18 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			var devices = context.Devices;
 			Console.WriteLine("デバイス数：{0}", devices.Count);
 
-			// 1デバイスで使う要素数を計算
-			countPerDevice = (int)Math.Ceiling((double)COUNT / devices.Count);
+			// 各デバイスで計算する要素数を初期化
+			countPerDevice = new int[devices.Count];
+
+			// 1デバイスが計算する最大要素数を計算
+			int maxCountPerDevice = (int)Math.Ceiling((double)COUNT / devices.Count);
+
+			// 全デバイスの
+			for(int i = 0; i < devices.Count; i++)
+			{
+				// 計算する要素数を計算
+				countPerDevice[i] = maxCountPerDevice - ((i < maxCountPerDevice * devices.Count - COUNT) ? 1 : 0);
+			}
 
 			// デバイス内での結果を作成
 			resultsPerDevice = new Real[devices.Count];
@@ -239,7 +251,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 
 			// カーネルを作成
 			multyplyEachElement = new ComputeKernel[devices.Count];
-			reductionSum = new ComputeKernel[REDUCTION_VERSION+1, devices.Count];
+			reductionSum = new ComputeKernel[REDUCTION_VERSION + 1, devices.Count];
 			for(int i = 0; i < devices.Count; i++)
 			{
 				multyplyEachElement[i] = program.CreateKernel("MultyplyEachElement");
@@ -262,9 +274,9 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			buffersResult = new ComputeBuffer<Real>[devices.Count];
 			for(int i = 0; i < devices.Count; i++)
 			{
-				buffersLeft[i] = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly, countPerDevice);
-				buffersRight[i] = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly, countPerDevice);
-				buffersResult[i] = new ComputeBuffer<Real>(context, ComputeMemoryFlags.WriteOnly, countPerDevice);
+				buffersLeft[i] = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly, countPerDevice[i]);
+				buffersRight[i] = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly, countPerDevice[i]);
+				buffersResult[i] = new ComputeBuffer<Real>(context, ComputeMemoryFlags.WriteOnly, countPerDevice[i]);
 			}
 		}
 
@@ -291,7 +303,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 				//    //queue.WriteToBuffer(result, buffersNonHostResult[i], false, 0, 0, 1, null);
 				//});
 			}
-			
+
 
 
 			// 計測開始
@@ -396,10 +408,10 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 				//  # 和を計算するベクトル
 				//  # 要素数
 				//  # 隣までの距離
-				reductionSum[0,0].SetMemoryArgument(0, bufferResult);
-				reductionSum[0,0].SetValueArgument(1, COUNT);
-				reductionSum[0,0].SetValueArgument(2, n);
-				queues[0].Execute(reductionSum[0,0], null, new long[] { globalSize }, null, null);
+				reductionSum[0, 0].SetMemoryArgument(0, bufferResult);
+				reductionSum[0, 0].SetValueArgument(1, COUNT);
+				reductionSum[0, 0].SetValueArgument(2, n);
+				queues[0].Execute(reductionSum[0, 0], null, new long[] { globalSize }, null, null);
 			}
 
 			// 結果を読み込み
@@ -445,7 +457,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 				queues[0].Execute(reductionSum[1, 0], null, new long[] { globalSize }, new long[] { localSize }, null);
 
 				// 次の配列の要素数を今のワークアイテム数にする
-				 targetSize = globalSize / localSize;
+				targetSize = globalSize / localSize;
 			}
 
 			// 結果を読み込み
@@ -456,7 +468,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 
 			return resultsPerDevice[0];
 		}
-		
+
 		/// <summary>
 		///	GPUを1つ使って内積を計算する（リダクションのバージョン2使用）
 		/// </summary>
@@ -474,7 +486,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 
 			// 計算する配列の要素数
 			int targetSize = COUNT;
-			
+
 			// 計算する配列の要素数が1以上の間
 			while(targetSize > 1)
 			{
@@ -567,9 +579,6 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			// 計算する配列の要素数
 			int targetSize = COUNT;
 
-			//var debug = new Real[COUNT];
-			//queues[0].ReadFromBuffer(bufferResult, ref debug, true, null);
-
 			// 計算する配列の要素数が1以上の間
 			while(targetSize > 1)
 			{
@@ -585,9 +594,6 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 				reductionSum[4, 0].SetLocalArgument(2, sizeof(Real) * localSize);
 				queues[0].Execute(reductionSum[4, 0], null, new long[] { globalSize }, new long[] { localSize }, null);
 
-
-				//queues[0].ReadFromBuffer(bufferResult, ref debug, true, 0, 0, targetSize, null);
-
 				// 次の配列の要素数を今のワークアイテム数にする
 				targetSize = globalSize / localSize;
 			}
@@ -599,6 +605,95 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			queues[0].Finish();
 
 			return resultsPerDevice[0];
+		}
+
+		/// <summary>
+		///	GPUを複数使って内積を計算する（リダクションのバージョン4使用）
+		/// </summary>
+		/// <returns>各要素同士の積の総和</returns>
+		static Real VectorDotParallelGpu4()
+		{
+			// 全キューについて
+			System.Threading.Tasks.Parallel.For(0, queues.Length, (i) =>
+			{
+				// 各要素同士の積を計算
+				//  # 結果を格納するベクトル
+				//  # 計算対象のベクトル1
+				//  # 計算対象のベクトル2
+				multyplyEachElement[i].SetMemoryArgument(0, buffersResult[i]);
+				multyplyEachElement[i].SetMemoryArgument(1, buffersLeft[i]);
+				multyplyEachElement[i].SetMemoryArgument(2, buffersRight[i]);
+				queues[i].Execute(multyplyEachElement[i], null, new long[] { countPerDevice[i] }, null, null);
+
+				//var debug = new Real[countPerDevice[i]];
+				//queues[i].ReadFromBuffer(buffersResult[i], ref debug, true, null);
+
+				// 計算する配列の要素数
+				int targetSize = countPerDevice[i];
+
+				// 計算する配列の要素数が1以上の間
+				while(targetSize > 1)
+				{
+					// ワークアイテム数を計算
+					int globalSize = (int)Math.Ceiling((double)targetSize / 2 / localSize) * localSize;
+
+					// 隣との和を計算
+					//  # 和を計算するベクトル
+					//  # 計算する要素数
+					//  # ローカルメモリ
+					reductionSum[4, i].SetMemoryArgument(0, buffersResult[i]);
+					reductionSum[4, i].SetValueArgument(1, targetSize);
+					reductionSum[4, i].SetLocalArgument(2, sizeof(Real) * localSize);
+					queues[i].Execute(reductionSum[4, i], null, new long[] { globalSize }, new long[] { localSize }, null);
+
+
+					//queues[i].ReadFromBuffer(buffersResult[i], ref debug, true, null);
+
+					// 次の配列の要素数を今のワークアイテム数にする
+					targetSize = globalSize / localSize;
+				}
+
+				// 結果を読み込み
+				queues[i].ReadFromBuffer(buffersResult[i], ref resultsPerDevice, false, 0, i, 1, null);
+
+				// 終了まで待機
+				queues[i].Finish();
+			});
+
+			// 全デバイスの結果を
+			for(int i = 1; i < resultsPerDevice.Length; i++)
+			{
+				// 先頭に合計
+				resultsPerDevice[0] += resultsPerDevice[i];
+			}
+
+			return resultsPerDevice[0];
+		}
+
+		/// <summary>
+		/// 複数GPUに各データを転送する
+		/// </summary>
+		/// <param name="left">計算対象1</param>
+		/// <param name="right">計算対象2</param>
+		static void WriteBuffers(Real[] left, Real[] right)
+		{
+			// 全キューについて
+			System.Threading.Tasks.Parallel.For(0, queues.Length, (i) =>
+			{
+				// 使用するキューを設定
+				var queue = queues[i];
+
+				// 担当する要素の開始地点を計算
+				int offset = 0;
+				for(int j = 0; j < i; j++)
+				{
+					offset += countPerDevice[j];
+				}
+
+				// データを転送
+				queue.WriteToBuffer(left, buffersLeft[i], false, offset * i, 0, countPerDevice[i], null);
+				queue.WriteToBuffer(right, buffersRight[i], false, offset * i, 0, countPerDevice[i], null);
+			});
 		}
 	}
 }

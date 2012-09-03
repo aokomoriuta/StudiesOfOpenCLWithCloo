@@ -264,5 +264,4 @@ __kernel void ReductionSum4(
 		// store sum of this group to global value
 		values[groupID] = localValues[0];
 	}
-	//values[get_global_id(0)] = (get_global_id(0) < count) ? localValues[iLocal] : -1;
 }
