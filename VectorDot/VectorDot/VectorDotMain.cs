@@ -194,7 +194,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			resultsPerDevice = new Real[devices.Count];
 
 			// ワークグループ内ワークアイテム数
-			localSize = 8;//(int)devices[0].MaxWorkItemSizes[0];
+			localSize = (int)devices[0].MaxWorkItemSizes[0];
 
 			// キューの配列を作成
 			queues = new ComputeCommandQueue[devices.Count];
@@ -296,11 +296,11 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 			stopwatch.Stop();
 
 
-			// 検算して違えば
-			if(result - answer > 1e-4)
+			// 精度以上の誤差があれば
+			if(result - answer > Math.Pow(10, (Math.Log10(answer) - 8)))
 			{
-				// 出力
-				Console.WriteLine("result={0,5:e} vs answer={1,5:e} ({2})", result, answer, result - answer);
+				// 誤差を通知出力
+				Console.WriteLine("result={0:e} vs answer={1:e} ({2:e})", result, answer, result - answer);
 			}
 
 			// 実行時間を返す
@@ -361,6 +361,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 
 			return result;
 		}
+
 
 		/// <summary>
 		///	GPUを1つ使って内積を計算する（リダクションのバージョン0使用）
@@ -447,9 +448,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorDot
 
 			return resultsPerDevice[0];
 		}
-
-
-
+		
 		/// <summary>
 		///	GPUを1つ使って内積を計算する（リダクションのバージョン2使用）
 		/// </summary>
