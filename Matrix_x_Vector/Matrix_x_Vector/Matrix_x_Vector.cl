@@ -5,7 +5,7 @@
 //! REAL is provided by compiler option
 typedef REAL Real;
 
-//! Multyply one element per one work-item
+//! Multiply matrix by vector
 /*!
 	\param result vector which result is stored to
 	\param left multiplied vector
@@ -27,11 +27,7 @@ __kernel void Matrix_x_Vector(
 	// for all non-zero row
 	for(int j = 0; j < nonzeroCount[i]; j++)
 	{
-		// get element value and column index
-		const Real a_ij = matrix[i * MAX_NONZERO_COUNT + j];
-		const int columnIndex = columnIndeces[i * MAX_NONZERO_COUNT + j];
-
 		// add matrix multiplied by vector
-		result[i] += a_ij * vector[columnIndex];
+		result[i] += matrix[i * MAX_NONZERO_COUNT + j] * vector[columnIndeces[i * MAX_NONZERO_COUNT + j]];
 	}
 }

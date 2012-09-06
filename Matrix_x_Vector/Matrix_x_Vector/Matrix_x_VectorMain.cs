@@ -101,7 +101,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 		#endregion
 
 		/// <summary>
-		/// 各要素同士の積を計算するカーネル
+		/// 行列とベクトルの積を計算するカーネル
 		/// </summary>
 		static ComputeKernel[] matrix_x_Vector;
 
@@ -393,7 +393,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 		}
 
 		/// <summary>
-		/// CPUで並列させて内積を計算する
+		/// CPUで並列させてて行列とベクトルの積を計算する
 		/// </summary>
 		/// <param name="result">結果を格納するベクトル</param>
 		/// <param name="matrix">行列</param>
@@ -422,7 +422,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 		}
 
 		/// <summary>
-		///	GPUを1つ使って内積を計算する
+		///	GPUを1つ使ってて行列とベクトルの積を計算する
 		/// </summary>
 		/// <param name="result">結果を格納するベクトル</param>
 		static void Matrix_x_VectorSingleGpu(Real[] result)
@@ -446,7 +446,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 		}
 
 		/// <summary>
-		///	GPUを複数使って内積を計算する
+		///	GPUを複数使ってて行列とベクトルの積を計算する
 		/// </summary>
 		/// <returns>各要素同士の積の総和</returns>
 		static void Matrix_x_VectorParallelGpu(Real[] result)
