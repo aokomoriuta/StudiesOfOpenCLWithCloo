@@ -16,7 +16,9 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.UseHostPointer
 		/// <summary>
 		/// 要素数
 		/// </summary>
-		const int COUNT = 1024 * 1024 * 15;
+		const int COUNT = 1024*1;//512 * 1024;
+
+		const Real C = -1;
 
 		/// <summary>
 		/// 検算用ベクトル
@@ -125,9 +127,9 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.UseHostPointer
 			for(int i = 0; i < COUNT; i++)
 			{
 				left[i] = (Real)i / 10000;
-				right[i] = (Real)i * 0 / COUNT;
+				right[i] = (Real)i / COUNT;
 
-				answer[i] = left[i] + right[i];
+				answer[i] = left[i] + C*right[i];
 			}
 
 			// OpenCLの使用準備
@@ -143,14 +145,14 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.UseHostPointer
 			// 各方法で実行して結果を表示
 			showResult("単一CPU                          ", false, () => SingleCpuAddition(result, left, right));
 			showResult("複数CPU                          ", false, () => ParallelCpuAddition(result, left, right));
+			showResult("複数GPU（非ホスト）データ転送あり", true, () => { WriteBuffers(left, right); ParallelGpuAdditionOneElementNonHost(result, left, right); });
+			showResult("複数GPU（非ホスト）データ転送なし", true, () => ParallelGpuAdditionOneElementNonHost(result, left, right));
 			showResult("単一GPU（ホスト）  データ転送あり", true, () => SingleGpuAdditionOneElementHost(result, left, right));
 			showResult("単一GPU（ホスト）  データ転送なし", true, () => SingleGpuAdditionOneElementHost(result, left, right));
 			showResult("複数GPU（ホスト）  データ転送あり", true, () => ParallelGpuAdditionOneElementHost(result, left, right));
 			showResult("複数GPU（ホスト）  データ転送なし", true, () => ParallelGpuAdditionOneElementHost(result, left, right));
 			showResult("単一GPU（非ホスト）データ転送あり", true, () => { WriteBuffer(left, right); SingleGpuAdditionOneElementNonHost(result, left, right); });
 			showResult("単一GPU（非ホスト）データ転送なし", true, () => { SingleGpuAdditionOneElementNonHost(result, left, right); });
-			showResult("複数GPU（非ホスト）データ転送あり", true, () => { WriteBuffers(left, right); ParallelGpuAdditionOneElementNonHost(result, left, right); });
-			showResult("複数GPU（非ホスト）データ転送なし", true, () => ParallelGpuAdditionOneElementNonHost(result, left, right));
 
 			// 成功で終了
 			return System.Environment.ExitCode;
@@ -317,7 +319,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.UseHostPointer
 			for(int i = 0; i < COUNT; i++)
 			{
 				// 足す
-				result[i] = left[i] + right[i];
+				result[i] = left[i] + C*right[i];
 			}
 		}
 
@@ -333,7 +335,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.UseHostPointer
 			System.Threading.Tasks.Parallel.For(0, COUNT, (i) =>
 			{
 				// 足す
-				result[i] = left[i] + right[i];
+				result[i] = left[i] + C*right[i];
 			});
 		}
 
@@ -355,6 +357,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.UseHostPointer
 			addOneElement[0].SetMemoryArgument(0, bufferHostResult);
 			addOneElement[0].SetMemoryArgument(1, bufferHostLeft);
 			addOneElement[0].SetMemoryArgument(2, bufferHostRight);
+			addOneElement[0].SetValueArgument(3, C);
 
 			// 計算を実行
 			queue.Execute(addOneElement[0], null, new long[] { COUNT }, null, null);
@@ -384,6 +387,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.UseHostPointer
 			addOneElement[0].SetMemoryArgument(0, bufferNonHostResult);
 			addOneElement[0].SetMemoryArgument(1, bufferNonHostLeft);
 			addOneElement[0].SetMemoryArgument(2, bufferNonHostRight);
+			addOneElement[0].SetValueArgument(3, C);
 
 			// 計算を実行
 			queue.Execute(addOneElement[0], null, new long[] { COUNT }, null, null);
@@ -413,6 +417,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.UseHostPointer
 				addOneElement[i].SetMemoryArgument(0, buffersHostResult[i]);
 				addOneElement[i].SetMemoryArgument(1, buffersHostLeft[i]);
 				addOneElement[i].SetMemoryArgument(2, buffersHostRight[i]);
+				addOneElement[i].SetValueArgument(3, C);
 
 				// 計算を実行
 				queues[i].Execute(addOneElement[i], null, new long[] { countPerDevice }, null, null);
@@ -443,6 +448,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.VectorAddition.UseHostPointer
 				addOneElement[i].SetMemoryArgument(0, buffersNonHostResult[i]);
 				addOneElement[i].SetMemoryArgument(1, buffersNonHostLeft[i]);
 				addOneElement[i].SetMemoryArgument(2, buffersNonHostRight[i]);
+				addOneElement[i].SetValueArgument(3, C);
 
 				// 計算を実行
 				queues[i].Execute(addOneElement[i], null, new long[] { countPerDevice }, null, null);

@@ -15,11 +15,12 @@ typedef REAL Real;
 __kernel void AddOneElement(
 	__global Real* result,
 	const __global const Real* left,
-	const __global const Real* right)
+	const __global const Real* right,
+	const Real C)
 {
 	// get element index
 	int i = get_global_id(0);
 
 	// add each element
-	result[i] = left[i] + right[i];
+	result[i] = left[i] + C*right[i];
 }
