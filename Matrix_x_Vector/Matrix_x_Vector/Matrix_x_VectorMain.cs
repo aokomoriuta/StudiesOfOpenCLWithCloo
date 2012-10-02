@@ -15,12 +15,12 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 		/// <summary>
 		/// 行数
 		/// </summary>
-		const int ROW_COUNT = 1024 * 1024;
+		const int ROW_COUNT = 345678;
 
 		/// <summary>
 		/// 1行に含まれる非ゼロ要素の最大列数
 		/// </summary>
-		const int MAX_NONZERO_COUNT = 30;
+		const int MAX_NONZERO_COUNT = 160;
 
 		/// <summary>
 		/// 全要素数
@@ -46,6 +46,11 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 		/// デバイスが計算する要素の開始地点
 		/// </summary>
 		static int[] offset;
+
+		/// <summary>
+		/// ワークグループ内のアイテム数
+		/// </summary>
+		static int[] localSize;
 
 		#region バッファー
 		/// <summary>
@@ -103,7 +108,12 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 		/// <summary>
 		/// 行列とベクトルの積を計算するカーネル
 		/// </summary>
-		static ComputeKernel[] matrix_x_Vector;
+		static ComputeKernel[,] matrix_x_Vector;
+
+		/// <summary>
+		/// カーネル数
+		/// </summary>
+		const int KERNEL_COUNT = 3;
 
 
 		/// <summary>
@@ -142,7 +152,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 				// 各列で
 				for(int j = Math.Max(0, i - MAX_NONZERO_COUNT / 2 + 1); j < Math.Min(ROW_COUNT, i + MAX_NONZERO_COUNT / 2); j++)
 				{
-					if(i != j)
+					if((i - j)%2 != 0)
 					{
 						// 行列の要素を計算
 						var a_ij = (Real)(i + j) / 10;//(Real)Math.Abs(Math.Sin(i + j));
@@ -191,21 +201,38 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 			Console.WriteLine();
 			Console.WriteLine("== 実行速度計測開始 ==");
 			Console.WriteLine("行列サイズ：{0}x{1} ({2}[MB])", ROW_COUNT, MAX_NONZERO_COUNT, COUNT * sizeof(Real) / 1024 / 1024);
-			Action<string, bool, Action<Real[]>> showResult = (name, useGpu, action) =>
-				Console.WriteLine("{0}: {1,12}", name, ProcessingTime(action, useGpu));
+			Action<string, Action<Real[]>, Action<Real[]>, Action<Real[]>> showResult = (name, initialize, action, finialize) =>
+			{
+				var times = ProcessingTime(initialize, action, finialize);
+
+				if(name.Length > 0)
+				{
+					Console.WriteLine("{0}: {1,12} +  {2,12} +  {3,12} = {4, 12}", name, times[0], times[1], times[2], times[0] + times[1] + times[2]);
+				}
+			};
 
 			// 各方法で実行して結果を表示
-			showResult("単一CPU", false, (result) => Matrix_x_VectorSingleCpu(result, matrix, vector, nonzeroCount, columnIndeces));
-			showResult("複数CPU", false, (result) => Matrix_x_VectorParallelCpu(result, matrix, vector, nonzeroCount, columnIndeces));
-			showResult("単一GPU", true, (result) => Matrix_x_VectorSingleGpu(result));
-			showResult("複数GPU", true, (result) => { WriteBuffers(matrix, vector, nonzeroCount, columnIndeces); Matrix_x_VectorParallelGpu(result); });
-
-			// もう1回
-			Console.WriteLine("---");
-			showResult("単一CPU", false, (result) => Matrix_x_VectorSingleCpu(result, matrix, vector, nonzeroCount, columnIndeces));
-			showResult("複数CPU", false, (result) => Matrix_x_VectorParallelCpu(result, matrix, vector, nonzeroCount, columnIndeces));
-			showResult("単一GPU", true, (result) => Matrix_x_VectorSingleGpu(result));
-			showResult("複数GPU", true, (result) => Matrix_x_VectorParallelGpu(result));
+			showResult("単一CPU      ",
+				(result) => { },
+				(result) => Matrix_x_VectorSingleCpu(result, matrix, vector, nonzeroCount, columnIndeces),
+				(result) => { });
+			showResult("複数CPU      ",
+				(result) => { },
+				(result) => Matrix_x_VectorParallelCpu(result, matrix, vector, nonzeroCount, columnIndeces),
+				(result) => { });
+			showResult("単一GPU ver.0",
+				(result) => WriteBuffer(matrix, vector, nonzeroCount, columnIndeces),
+				(result) => Matrix_x_VectorSingleGpu0(result),
+				(result) => ReadBuffer(result));
+			showResult("単一GPU ver.1",
+				(result) => WriteBuffer(matrix, vector, nonzeroCount, columnIndeces),
+				(result) => Matrix_x_VectorSingleGpu1(result),
+				(result) => ReadBuffer(result));
+			showResult("単一GPU ver.2",
+				(result) => WriteBuffer(matrix, vector, nonzeroCount, columnIndeces),
+				(result) => Matrix_x_VectorSingleGpu2(result),
+				(result) => ReadBuffer(result));
+			//showResult("複数GPU", true, (result) => { WriteBuffers(matrix, vector, nonzeroCount, columnIndeces); Matrix_x_VectorParallelGpu(result); });
 
 			// 成功で終了
 			return System.Environment.ExitCode;
@@ -233,8 +260,9 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 			// 1デバイスが計算する最大要素数を計算
 			int maxCountPerDevice = (int)Math.Ceiling((double)ROW_COUNT / devices.Count);
 
-			// デバイスの計算開始番号を作成
+			// デバイスの計算開始番号とローカルアイテム数を作成
 			offset = new int[devices.Count];
+			localSize = new int[devices.Count];
 
 			// 全デバイスの
 			for(int i = 0; i < devices.Count; i++)
@@ -244,6 +272,9 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 
 				// 計算開始番号を設定
 				offset[i] = (i == 0) ? 0 : (offset[i - 1] + countPerDevice[i - 1]);
+
+				// ローカルアイテム数を取得
+				localSize[i] = 8;// (int)devices[i].MaxWorkGroupSize;
 			}
 
 			// キューの配列を作成
@@ -283,18 +314,21 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 			}
 
 			// カーネルを作成
-			matrix_x_Vector = new ComputeKernel[devices.Count];
-			for(int i = 0; i < devices.Count; i++)
+			matrix_x_Vector = new ComputeKernel[KERNEL_COUNT, devices.Count];
+			for(int i = 0; i < KERNEL_COUNT; i++)
 			{
-				matrix_x_Vector[i] = program.CreateKernel("Matrix_x_Vector");
+				for(int j = 0; j < devices.Count; j++)
+				{
+					matrix_x_Vector[i, j] = program.CreateKernel("Matrix_x_Vector" + i);
+				}
 			}
 
 			// 単一GPU用バッファーを作成
 			bufferResult = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadWrite, vector.Length);
-			bufferMatrix = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.UseHostPointer, matrix);
-			bufferVector = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.UseHostPointer, vector);
-			bufferColumnIndeces = new ComputeBuffer<int>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.UseHostPointer, columnIndeces);
-			bufferNonzeroCount = new ComputeBuffer<int>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.UseHostPointer, nonzeroCount);
+			bufferMatrix = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly, matrix.Length);
+			bufferVector = new ComputeBuffer<Real>(context, ComputeMemoryFlags.ReadOnly, vector.Length);
+			bufferColumnIndeces = new ComputeBuffer<int>(context, ComputeMemoryFlags.ReadOnly, columnIndeces.Length);
+			bufferNonzeroCount = new ComputeBuffer<int>(context, ComputeMemoryFlags.ReadOnly, nonzeroCount.Length);
 
 			// 複数GPU用バッファーを作成
 			buffersResult = new ComputeBuffer<Real>[devices.Count];
@@ -317,36 +351,38 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 		/// </summary>
 		/// <param name="action">計測対象の操作</param>
 		/// <returns>実行時間（ミリ秒）</returns>
-		static long ProcessingTime(Action<Real[]> action, bool useGpu)
+		static long[] ProcessingTime(Action<Real[]> initialize, Action<Real[]> action, Action<Real[]> finialize)
 		{
 			// ストップウォッチ作成
 			var stopwatch = new System.Diagnostics.Stopwatch();
 
-			// GPUなら
-			if(useGpu)
-			{
-				//// 全キューについて
-				//System.Threading.Tasks.Parallel.For(0, queues.Length, (i) =>
-				//{
-				//    // 使用するキューを設定
-				//    var queue = queues[i];
-
-				//    // 結果バッファーに初期状態を転送
-				//    //queue.WriteToBuffer(result, buffersNonHostResult[i], false, 0, 0, 1, null);
-				//});
-			}
-
 			// 結果を初期化
 			var result = new Real[ROW_COUNT];
 
-			// 計測開始
+			// 速度計測の結果
+			var times = new long[3];
+
+			// 前処理を実行
 			stopwatch.Restart();
-
-			// 操作を実行
-			action(result);
-
-			// 計測終了
+			initialize(result);
 			stopwatch.Stop();
+			times[0] = stopwatch.ElapsedTicks;
+
+			// 処理本体を実行
+			stopwatch.Restart();
+			for(int i = 0; i < 100; i++)
+			{
+				//Console.WriteLine(i);
+				action(result);
+			}
+			stopwatch.Stop();
+			times[1] = stopwatch.ElapsedTicks;
+
+			// 後処理を実行
+			stopwatch.Restart();
+			finialize(result);
+			stopwatch.Stop();
+			times[2] = stopwatch.ElapsedTicks;
 
 			for(int i = 0; i < result.Length; i++)
 			{
@@ -359,7 +395,7 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 			}
 
 			// 実行時間を返す
-			return stopwatch.ElapsedTicks;
+			return times;
 		}
 
 
@@ -422,62 +458,135 @@ namespace LWisteria.StudiesOfOpenTKWithCloo.Matrix_x_Vector
 		}
 
 		/// <summary>
-		///	GPUを1つ使ってて行列とベクトルの積を計算する
+		///	GPUを1つ使ってて行列とベクトルの積を計算する（ver.0）
 		/// </summary>
 		/// <param name="result">結果を格納するベクトル</param>
-		static void Matrix_x_VectorSingleGpu(Real[] result)
+		static void Matrix_x_VectorSingleGpu0(Real[] result)
 		{
 			// 各要素同士の積を計算
 			//  # 結果を格納するベクトル
 			//  # 計算対象のベクトル1
 			//  # 計算対象のベクトル2
-			matrix_x_Vector[0].SetMemoryArgument(0, bufferResult);
-			matrix_x_Vector[0].SetMemoryArgument(1, bufferMatrix);
-			matrix_x_Vector[0].SetMemoryArgument(2, bufferVector);
-			matrix_x_Vector[0].SetMemoryArgument(3, bufferColumnIndeces);
-			matrix_x_Vector[0].SetMemoryArgument(4, bufferNonzeroCount);
-			queues[0].Execute(matrix_x_Vector[0], null, new long[] { ROW_COUNT }, null, null);
-
-			// 結果を読み込み
-			queues[0].ReadFromBuffer(bufferResult, ref result, false, null);
+			matrix_x_Vector[0, 0].SetMemoryArgument(0, bufferResult);
+			matrix_x_Vector[0, 0].SetMemoryArgument(1, bufferMatrix);
+			matrix_x_Vector[0, 0].SetMemoryArgument(2, bufferVector);
+			matrix_x_Vector[0, 0].SetMemoryArgument(3, bufferColumnIndeces);
+			matrix_x_Vector[0, 0].SetMemoryArgument(4, bufferNonzeroCount);
+			queues[0].Execute(matrix_x_Vector[0, 0], null, new long[] { ROW_COUNT }, null, null);
 
 			// 終了まで待機
 			queues[0].Finish();
 		}
 
 		/// <summary>
-		///	GPUを複数使ってて行列とベクトルの積を計算する
+		///	GPUを1つ使ってて行列とベクトルの積を計算する（ver.1）
 		/// </summary>
-		/// <returns>各要素同士の積の総和</returns>
-		static void Matrix_x_VectorParallelGpu(Real[] result)
+		/// <param name="result">結果を格納するベクトル</param>
+		static void Matrix_x_VectorSingleGpu1(Real[] result)
 		{
-			// 全キューについて
-			System.Threading.Tasks.Parallel.For(0, queues.Length, (i) =>
-			{
-				// 各要素同士の積を計算
-				//  # 結果を格納するベクトル
-				//  # 計算対象のベクトル1
-				//  # 計算対象のベクトル2
-				matrix_x_Vector[i].SetMemoryArgument(0, buffersResult[i]);
-				matrix_x_Vector[i].SetMemoryArgument(1, buffersMatrix[i]);
-				matrix_x_Vector[i].SetMemoryArgument(2, buffersVector[i]);
-				matrix_x_Vector[i].SetMemoryArgument(3, buffersColumnIndeces[i]);
-				matrix_x_Vector[i].SetMemoryArgument(4, buffersNonzeroCount[i]);
-				queues[i].Execute(matrix_x_Vector[i], null, new long[] { countPerDevice[i] }, null, null);
+			// 各要素同士の積を計算
+			//  # 結果を格納するベクトル
+			//  # 計算対象のベクトル1
+			//  # 計算対象のベクトル2
+			matrix_x_Vector[1, 0].SetMemoryArgument(0, bufferResult);
+			matrix_x_Vector[1, 0].SetMemoryArgument(1, bufferMatrix);
+			matrix_x_Vector[1, 0].SetMemoryArgument(2, bufferVector);
+			matrix_x_Vector[1, 0].SetMemoryArgument(3, bufferColumnIndeces);
+			matrix_x_Vector[1, 0].SetMemoryArgument(4, bufferNonzeroCount);
+			queues[0].Execute(matrix_x_Vector[1, 0], null, new long[] { ROW_COUNT }, null, null);
 
-				// 結果を読み込み
-				queues[i].ReadFromBuffer(buffersResult[i], ref result, false, 0, offset[i], countPerDevice[i], null);
+			// 終了まで待機
+			queues[0].Finish();
+		}
 
-				// 終了まで待機
-				queues[i].Finish();
-			});
+		/// <summary>
+		///	GPUを1つ使ってて行列とベクトルの積を計算する（ver.2）
+		/// </summary>
+		/// <param name="result">結果を格納するベクトル</param>
+		static void Matrix_x_VectorSingleGpu2(Real[] result)
+		{
+			// グローバルアイテム数を計算
+			int globalSize = (int)Math.Ceiling((double)ROW_COUNT / localSize[0]) * localSize[0];
+
+			// バッファーサイズを設定
+			int bufferSize = MAX_NONZERO_COUNT;
+
+			// 各要素同士の積を計算
+			//  # 結果を格納するベクトル
+			//  # 計算対象のベクトル1
+			//  # 計算対象のベクトル2
+			matrix_x_Vector[2, 0].SetValueArgument (0, ROW_COUNT);
+			matrix_x_Vector[2, 0].SetMemoryArgument(1, bufferResult);
+			matrix_x_Vector[2, 0].SetMemoryArgument(2, bufferMatrix);
+			matrix_x_Vector[2, 0].SetMemoryArgument(3, bufferVector);
+			matrix_x_Vector[2, 0].SetMemoryArgument(4, bufferColumnIndeces);
+			matrix_x_Vector[2, 0].SetMemoryArgument(5, bufferNonzeroCount);
+			matrix_x_Vector[2, 0].SetValueArgument(6, bufferSize);
+			matrix_x_Vector[2, 0].SetLocalArgument(7, sizeof(Real) * (2 * bufferSize + localSize[0]));
+			queues[0].Execute(matrix_x_Vector[2, 0], null, new long[] { globalSize }, new long[] { localSize[0] }, null);
+
+			// 終了まで待機
+			queues[0].Finish();
+		}
+
+		///// <summary>
+		/////	GPUを複数使ってて行列とベクトルの積を計算する
+		///// </summary>
+		///// <returns>各要素同士の積の総和</returns>
+		//static void Matrix_x_VectorParallelGpu0(Real[] result)
+		//{
+		//	// 全キューについて
+		//	System.Threading.Tasks.Parallel.For(0, queues.Length, (i) =>
+		//	{
+		//		// 各要素同士の積を計算
+		//		//  # 結果を格納するベクトル
+		//		//  # 計算対象のベクトル1
+		//		//  # 計算対象のベクトル2
+		//		matrix_x_Vector[0, i].SetMemoryArgument(0, buffersResult[i]);
+		//		matrix_x_Vector[0, i].SetMemoryArgument(1, buffersMatrix[i]);
+		//		matrix_x_Vector[i].SetMemoryArgument(2, buffersVector[i]);
+		//		matrix_x_Vector[i].SetMemoryArgument(3, buffersColumnIndeces[i]);
+		//		matrix_x_Vector[i].SetMemoryArgument(4, buffersNonzeroCount[i]);
+		//		queues[i].Execute(matrix_x_Vector[i], null, new long[] { countPerDevice[i] }, null, null);
+
+		//		// 結果を読み込み
+		//		queues[i].ReadFromBuffer(buffersResult[i], ref result, false, 0, offset[i], countPerDevice[i], null);
+
+		//		// 終了まで待機
+		//		queues[i].Finish();
+		//	});
+		//}
+
+		/// <summary>
+		/// 単一GPUに各データを転送する
+		/// </summary>
+		static void WriteBuffer(Real[] matrix, Real[] vector, int[] nonzeroCount, int[] columnIndeces)
+		{
+			// 使用するキューを設定
+			var queue = queues[0];
+
+			// データを転送
+			queue.WriteToBuffer(matrix, bufferMatrix, false, null);
+			queue.WriteToBuffer(vector, bufferVector, false, null);
+			queue.WriteToBuffer(columnIndeces, bufferColumnIndeces, false, null);
+			queue.WriteToBuffer(nonzeroCount, bufferNonzeroCount, false, null);
+
+			queue.Finish();
+		}
+
+		/// <summary>
+		/// 単一GPUからデータを読み込み
+		/// </summary>
+		/// <param name="result">結果</param>
+		static void ReadBuffer(Real[] result)
+		{
+			// 結果を読み込み
+			queues[0].ReadFromBuffer(bufferResult, ref result, true, null);
 		}
 
 		/// <summary>
 		/// 複数GPUに各データを転送する
 		/// </summary>
-		/// <param name="left">計算対象1</param>
-		/// <param name="right">計算対象2</param>
 		static void WriteBuffers(Real[] matrix, Real[] vector, int[] nonzeroCount, int[] columnIndeces)
 		{
 			// 全キューについて
